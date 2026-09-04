@@ -1,14 +1,13 @@
 (function () {
   "use strict";
 
-  const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-  const ANTHROPIC_VERSION = "2023-06-01";
+  const CHAT_ENDPOINT = "/api/chat";
+  const MODEL = "claude-sonnet-4-5-20250929";
 
   const els = {
     setup: document.getElementById("setup"),
-    apiKeyInput: document.getElementById("api-key"),
-    modelSelect: document.getElementById("model"),
     startBtn: document.getElementById("start-btn"),
+    configError: document.getElementById("config-error"),
     chatWrap: document.getElementById("chat-wrap"),
     composer: document.getElementById("composer"),
     input: document.getElementById("input"),
@@ -26,8 +25,6 @@
 
   function saveSessionState() {
     try {
-      sessionStorage.setItem("dm_api_key", els.apiKeyInput.value.trim());
-      sessionStorage.setItem("dm_model", els.modelSelect.value);
       sessionStorage.setItem("dm_messages", JSON.stringify(messages));
     } catch (e) {
       /* ignore storage errors (private browsing, etc.) */
@@ -36,14 +33,8 @@
 
   function restoreSessionState() {
     try {
-      const key = sessionStorage.getItem("dm_api_key");
-      const model = sessionStorage.getItem("dm_model");
       const msgs = sessionStorage.getItem("dm_messages");
-      if (key) els.apiKeyInput.value = key;
-      if (model) els.modelSelect.value = model;
-      if (msgs) {
-        messages = JSON.parse(msgs);
-      }
+      if (msgs) messages = JSON.parse(msgs);
     } catch (e) {
       /* ignore */
     }
@@ -51,8 +42,6 @@
 
   function clearSession() {
     try {
-      sessionStorage.removeItem("dm_api_key");
-      sessionStorage.removeItem("dm_model");
       sessionStorage.removeItem("dm_messages");
     } catch (e) {
       /* ignore */
@@ -165,40 +154,30 @@
     downloadText("data-mapping-row.md", buildMarkdown(latestRow), "text/markdown");
   });
 
-  async function callClaude(apiKey, model, msgs) {
-    const res = await fetch(ANTHROPIC_URL, {
+  // Calls our own backend (api/chat.js), which holds the Anthropic API key
+  // server-side. The browser never sees or handles any API key.
+  async function callAssistant(msgs) {
+    const res = await fetch(CHAT_ENDPOINT, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": ANTHROPIC_VERSION,
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        model: model,
-        max_tokens: 2048,
+        model: MODEL,
         system: SYSTEM_PROMPT,
         messages: msgs.map((m) => ({ role: m.role, content: m.content })),
       }),
     });
 
-    if (!res.ok) {
-      let detail = "";
-      try {
-        const errJson = await res.json();
-        detail = errJson && errJson.error && errJson.error.message ? errJson.error.message : JSON.stringify(errJson);
-      } catch (e) {
-        detail = await res.text();
-      }
-      throw new Error(`Anthropic API error (${res.status}): ${detail}`);
+    let data;
+    try {
+      data = await res.json();
+    } catch (e) {
+      throw new Error(`Unexpected response from server (${res.status}).`);
     }
 
-    const data = await res.json();
-    const text = (data.content || [])
-      .filter((b) => b.type === "text")
-      .map((b) => b.text)
-      .join("\n");
-    return text;
+    if (!res.ok) {
+      throw new Error(data.error || `Server error (${res.status}).`);
+    }
+    return data.text;
   }
 
   async function sendMessage(userText) {
@@ -212,9 +191,7 @@
 
     addTypingIndicator();
     try {
-      const apiKey = els.apiKeyInput.value.trim();
-      const model = els.modelSelect.value;
-      const replyText = await callClaude(apiKey, model, messages);
+      const replyText = await callAssistant(messages);
       removeTypingIndicator();
 
       messages.push({ role: "assistant", content: replyText });
@@ -261,34 +238,24 @@
   });
 
   els.resetBtn.addEventListener("click", () => {
-    if (confirm("Clear this conversation and your API key from this browser tab?")) {
+    if (confirm("Clear this conversation?")) {
       clearSession();
     }
   });
 
   function beginChat() {
-    const apiKey = els.apiKeyInput.value.trim();
-    if (!apiKey) {
-      alert("Please enter your Anthropic API key to continue.");
-      return;
-    }
-    saveSessionState();
     els.setup.style.display = "none";
     els.chatWrap.style.display = "block";
     els.composer.style.display = "flex";
 
     if (messages.length === 0) {
       // Kick off the interview with an opening assistant turn.
-      messages.push({
-        role: "user",
-        content:
-          "Hi — I'd like to document a new data processing activity for the Data Mapping Register. Please start the interview.",
-      });
-      addMessageToDom("user", "Hi — I'd like to document a new data processing activity for the Data Mapping Register. Please start the interview.");
+      const opener =
+        "Hi — I'd like to document a new data processing activity for the Data Mapping Register. Please start the interview.";
+      messages.push({ role: "user", content: opener });
+      addMessageToDom("user", opener);
       addTypingIndicator();
-      const apiKeyVal = apiKey;
-      const model = els.modelSelect.value;
-      callClaude(apiKeyVal, model, messages)
+      callAssistant(messages)
         .then((replyText) => {
           removeTypingIndicator();
           messages.push({ role: "assistant", content: replyText });
