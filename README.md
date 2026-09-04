@@ -13,47 +13,59 @@ key is configured once, centrally, by whoever sets up the deployment.
 - `index.html` / `app.js` — the chat page. It never sees an API key.
 - `schema.js` — the interview logic: question order, validation rules, the register's reference/drop-down
   lists, and a plain-language glossary of legal terms, sent as the system prompt.
-- `api/chat.js` — a small serverless backend function. It reads the Anthropic API key from a server-side
-  environment variable (`ANTHROPIC_API_KEY`) that only the deployment owner sets, calls the Claude API, and
-  relays the reply back to the page. The key is never exposed to the browser or to end users.
+- `functions/api/chat.js` — a small backend function (Cloudflare Pages Functions format) and
+  `api/chat.js` — the same function in Vercel's format, kept as an alternative. Either one reads the
+  Anthropic API key from a server-side environment variable/secret (`ANTHROPIC_API_KEY`) that only the
+  deployment owner sets, calls the Claude API, and relays the reply back to the page. The key is never
+  exposed to the browser or to end users.
 - When the assistant has gathered enough information, it summarizes the row back to the user for
   confirmation and then emits a structured result. The page detects that and unlocks **Download CSV /
   Download JSON / Download Markdown** buttons so the finished row can be handed to Legal/Privacy.
 
-## Deploying it (one-time setup, ~5 minutes)
+## Deploying it (one-time setup, ~5 minutes) — Cloudflare Pages
 
-This repo is set up as a [Vercel](https://vercel.com) project (static page + one serverless function), which
-has a free tier and needs no server management.
+This is the recommended option: **Cloudflare Pages' free tier does not require a credit card or paid
+plan** for this kind of small static site + function (100,000 function requests/day free).
 
-1. Go to **vercel.com**, sign up or log in (you can use the "Continue with GitHub" option).
-2. Click **Add New… → Project**, then **Import** this repository
+1. Go to **dash.cloudflare.com**, sign up or log in (free account).
+2. In the sidebar, go to **Workers & Pages → Create → Pages → Connect to Git**.
+3. Authorize Cloudflare to access GitHub and select this repository
    (`rayener-ops/data-mapping-intake-agent`).
-3. Before deploying, open **Environment Variables** and add:
+4. Build settings: framework preset **None**, build command **(leave blank)**, build output directory
+   **`/`** (the repo root — that's where `index.html` lives).
+5. Before the first deploy, or right after under **Settings → Environment variables**, add a variable:
    - Name: `ANTHROPIC_API_KEY`
    - Value: an Anthropic API key from **console.anthropic.com → API Keys** (create one on whichever
-     account/org should be billed for this tool's usage).
-4. Click **Deploy**. Vercel gives you a live URL (e.g. `https://data-mapping-intake-agent.vercel.app`).
-5. Share that URL with the team — that's the whole rollout. No one else needs a key or any setup.
+     account/org should be billed for this tool's usage). Mark it as a **secret** so it isn't shown in
+     the dashboard afterward.
+6. Click **Save and Deploy**. Cloudflare gives you a live URL (e.g.
+   `https://data-mapping-intake-agent.pages.dev`).
+7. Share that URL with the team — that's the whole rollout. No one else needs a key or any setup.
 
-To rotate or replace the key later, update the `ANTHROPIC_API_KEY` value in the Vercel project's
-**Settings → Environment Variables** and redeploy (Vercel prompts you to).
+To rotate or replace the key later, update the `ANTHROPIC_API_KEY` value under **Settings → Environment
+variables** and redeploy (Cloudflare prompts you to, or it picks it up on the next deploy).
 
-### Alternative hosts
+### Alternative: Vercel
 
-Any host that can run a small Node serverless/edge function alongside static files works the same way
-(e.g. Netlify Functions, Cloudflare Pages Functions) — the pattern is the same: serve `index.html`/`app.js`/
-`schema.js` as static files, run `api/chat.js` as a function, and set `ANTHROPIC_API_KEY` as a server-side
-environment variable there.
+Vercel works the same way using `api/chat.js` instead of `functions/api/chat.js`, but some Vercel accounts
+now require a paid plan to deploy new projects — check your account before choosing this route. If it's
+available: import the repo at **vercel.com → Add New → Project**, add the same `ANTHROPIC_API_KEY`
+environment variable, and deploy.
+
+### Other hosts
+
+Any host that can run a small Node/edge function alongside static files works the same way (e.g. Netlify
+Functions) — serve `index.html`/`app.js`/`schema.js` as static files, run the chat function, and set
+`ANTHROPIC_API_KEY` as a server-side environment variable/secret there.
 
 ## Local development
 
 ```bash
-npm install -g vercel
-vercel dev
+npm install -g wrangler
+wrangler pages dev . --binding ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-This runs both the static page and the `api/chat.js` function locally at `http://localhost:3000`. Create a
-`.env.local` file with `ANTHROPIC_API_KEY=sk-ant-...` for local testing (this file is git-ignored).
+This runs both the static page and `functions/api/chat.js` locally.
 
 ## Using it
 
